@@ -102,15 +102,22 @@ class MainActivity : Activity() {
         }
 
     /** Boton que repite el codigo mientras se mantiene apretado. */
-    private fun holdButton(text: String, c: Code, onSend: (() -> Unit)? = null): Button {
+    private fun holdButton(
+        text: String,
+        c: Code,
+        fast: Boolean = false,
+        onSend: (() -> Unit)? = null
+    ): Button {
         val fire: () -> Unit = {
             send(c)
             onSend?.invoke()
         }
+        val period = if (fast) 40L else 150L
+        val first = if (fast) 40L else 450L
         val rep = object : Runnable {
             override fun run() {
                 fire()
-                ui.postDelayed(this, 150)
+                ui.postDelayed(this, period)
             }
         }
         return Button(this).apply {
@@ -120,7 +127,7 @@ class MainActivity : Activity() {
                     MotionEvent.ACTION_DOWN -> {
                         v.isPressed = true
                         fire()
-                        ui.postDelayed(rep, 450)
+                        ui.postDelayed(rep, first)
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                         v.isPressed = false
@@ -182,6 +189,15 @@ class MainActivity : Activity() {
             holdButton("Sintonia \u2212", Codes.PREV_TUNE_DN) { addFreq(-stepValue()) },
             holdButton("Sintonia +", Codes.NEXT_TUNE_UP) { addFreq(stepValue()) }
         ))
+        root.addView(label("Buscar: mantene apretado (repite rapido, como el control original)"))
+        root.addView(row(
+            holdButton("Buscar \u2212", Codes.PREV_TUNE_DN, true) {
+                status.text = "Buscando... despues corregi la frecuencia actual"
+            },
+            holdButton("Buscar +", Codes.NEXT_TUNE_UP, true) {
+                status.text = "Buscando... despues corregi la frecuencia actual"
+            }
+        ))
         root.addView(label("Ir a una frecuencia (MHz)"))
         gotoInput = edit("ej. 88.7", "", true)
         root.addView(row(gotoInput, button("Ir") { goTo() }, button("Cancelar") { cancel = true }))
@@ -232,6 +248,7 @@ class MainActivity : Activity() {
             isChecked = true
         }
         root.addView(labNibble)
+        root.addView(button("Mantener 3 segundos (rafaga del 'desde')") { labHold() })
         root.addView(row(
             button("Enviar uno (el 'desde')") { labSendOne() },
             button("Escanear") { labScan() },
@@ -302,6 +319,26 @@ class MainActivity : Activity() {
         if (g == null || id == null || c == null) { toast("Datos invalidos"); return }
         send(g, id, c)
         status.text = String.format("Enviado: genero %02X, id %d, cmd 0x%03X", g, id, c)
+    }
+
+    private fun labHold() {
+        if (busy) { toast("Hay una operacion en curso"); return }
+        val g = labGenre.text.toString().toIntOrNull(16)
+        val id = labId.text.toString().toIntOrNull()
+        val c = labFrom.text.toString().toIntOrNull(16)
+        if (g == null || id == null || c == null) { toast("Datos invalidos"); return }
+        busy = true
+        cancel = false
+        Thread {
+            val end = System.currentTimeMillis() + 3000
+            while (System.currentTimeMillis() < end && !cancel) {
+                send(g, id, c)
+                try { Thread.sleep(40) } catch (e: InterruptedException) { break }
+            }
+            busy = false
+            val txt = String.format("Rafaga enviada: genero %02X, id %d, cmd 0x%03X", g, id, c)
+            runOnUiThread { status.text = txt }
+        }.start()
     }
 
     private fun labScan() {
